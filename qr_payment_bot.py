@@ -379,32 +379,13 @@ async def check_key(
                 # Tính thời gian còn lại
                 time_left = expiry_date - current_time
                 days_left = time_left.days
-                
-                # Create embed for response
-                embed = discord.Embed(
-                    title="🔍 Thông tin key",
-                    color=discord.Color.green() if days_left > 0 else discord.Color.red()
-                )
-                
-                embed.add_field(
-                    name="Key",
-                    value=f"`{key}`",
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="Thời hạn",
-                    value=f"<t:{timestamp}:F>",
-                    inline=False
-                )
 
-                embed.add_field(
-                    name="Trạng thái",
-                    value=f"{'🟢 Còn ' + str(days_left) + ' ngày' if days_left > 0 else '🔴 Đã hết hạn'}",
-                    inline=False
-                )
-                
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                # Tạo thông báo
+                if days_left > 0:
+                    await interaction.followup.send(f"✅ Key `{key}` còn **{days_left}** ngày.", ephemeral=True)
+                else:
+                    await interaction.followup.send(f"❌ Key `{key}` đã hết hạn.", ephemeral=True)
+
             except ValueError as ve:
                 await interaction.followup.send("❌ Dữ liệu không hợp lệ từ server.", ephemeral=True)
         else:
