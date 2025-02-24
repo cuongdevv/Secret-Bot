@@ -353,10 +353,10 @@ async def check_key(
 
                 error = data.get("error")
                 message = data.get("message")
-                timestamp = data.get("data")
+                seconds_remaining = data.get("data")
 
                 # Key không tồn tại hoặc hết hạn
-                if error is None or message is None or timestamp is None:
+                if error is None or message is None or seconds_remaining is None:
                     await interaction.followup.send("❌ Phản hồi từ server không đầy đủ thông tin.", ephemeral=True)
                     return
 
@@ -365,24 +365,19 @@ async def check_key(
                     await interaction.followup.send("❌ Key không tồn tại hoặc đã hết hạn.", ephemeral=True)
                     return
 
-                # Convert timestamp to int
+                # Convert seconds_remaining to int
                 try:
-                    timestamp = int(timestamp)
+                    seconds_remaining = int(seconds_remaining)
                 except (ValueError, TypeError):
                     await interaction.followup.send("❌ Định dạng thời gian không hợp lệ.", ephemeral=True)
                     return
 
-                # Convert timestamp to datetime
-                expiry_date = datetime.fromtimestamp(timestamp)
-                current_time = datetime.now()
-                
-                # Tính thời gian còn lại
-                time_left = expiry_date - current_time
-                days_left = time_left.days
+                # Tính số ngày còn lại
+                days_remaining = seconds_remaining // (24 * 3600)  # Chuyển giây thành ngày
 
                 # Tạo thông báo
-                if days_left > 0:
-                    await interaction.followup.send(f"✅ Key `{key}` còn **{days_left}** ngày.", ephemeral=True)
+                if seconds_remaining > 0:
+                    await interaction.followup.send(f"✅ Key `{key}` còn **{days_remaining}** ngày.", ephemeral=True)
                 else:
                     await interaction.followup.send(f"❌ Key `{key}` đã hết hạn.", ephemeral=True)
 
