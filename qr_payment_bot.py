@@ -362,6 +362,11 @@ async def check_key(
                 if error is None or message is None or timestamp is None:
                     await interaction.followup.send("❌ Phản hồi từ server không đầy đủ thông tin.", ephemeral=True)
                     return
+
+                # Kiểm tra giá trị error và message
+                if error != 0 or message != "ok":
+                    await interaction.followup.send("❌ Key không tồn tại hoặc đã hết hạn.", ephemeral=True)
+                    return
                     
                 if isinstance(timestamp, str):
                     try:
