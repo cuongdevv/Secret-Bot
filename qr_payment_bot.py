@@ -356,13 +356,29 @@ async def check_key(
                 seconds_remaining = data.get("data")
 
                 # Key không tồn tại hoặc hết hạn
-                if error is None or message is None or seconds_remaining is None:
+                if error is None or message is None:
                     await interaction.followup.send("❌ Phản hồi từ server không đầy đủ thông tin.", ephemeral=True)
                     return
 
-                # Kiểm tra giá trị error và message
-                if not isinstance(error, (int, float)) or error != 0 or message.lower() != "ok":
+                # Convert error to int if it's string
+                if isinstance(error, str):
+                    try:
+                        error = int(error)
+                    except ValueError:
+                        await interaction.followup.send("❌ Định dạng dữ liệu không hợp lệ.", ephemeral=True)
+                        return
+
+                # Kiểm tra các trường hợp error
+                if error == 2:
+                    await interaction.followup.send(f"⚠️ Key `{key}` chưa được kích hoạt.", ephemeral=True)
+                    return
+                elif error != 0 or message.lower() != "ok":
                     await interaction.followup.send("❌ Key không tồn tại hoặc đã hết hạn.", ephemeral=True)
+                    return
+
+                # Kiểm tra data cho key hợp lệ
+                if seconds_remaining is None:
+                    await interaction.followup.send("❌ Không lấy được thông tin thời hạn.", ephemeral=True)
                     return
 
                 # Convert seconds_remaining to int
