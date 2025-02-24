@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from urllib.parse import quote
 import requests
 from datetime import datetime
+import asyncio  # Thêm import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -356,11 +357,26 @@ async def check_key(
             # Kiểm tra từng key
             for key in key_list:
                 try:
+                    # Thêm delay 0.5 giây giữa các request
+                    await asyncio.sleep(0.5)
+                    
                     api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
-                    response = requests.get(api_url)
+                    for attempt in range(3):  # Thử tối đa 3 lần cho mỗi key
+                        try:
+                            response = requests.get(api_url, timeout=10)  # Thêm timeout
+                            break
+                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                            if attempt == 2:  # Nếu đã thử 3 lần vẫn lỗi
+                                error_keys.append(key)
+                                continue
+                            await asyncio.sleep(1)  # Chờ 1 giây trước khi thử lại
                     
                     if response.status_code == 200:
-                        data = response.json()
+                        try:
+                            data = response.json()
+                        except:
+                            error_keys.append(key)
+                            continue
                         
                         if not isinstance(data, dict):
                             error_keys.append(key)
@@ -390,8 +406,8 @@ async def check_key(
                         else:
                             try:
                                 seconds_remaining = int(seconds_remaining)
-                                days_remaining = seconds_remaining // (24 * 3600)
                                 if seconds_remaining > 0:
+                                    days_remaining = seconds_remaining // (24 * 3600)
                                     active_keys.append((key, days_remaining))
                                 else:
                                     inactive_keys.append(key)
@@ -403,6 +419,7 @@ async def check_key(
                 except Exception as e:
                     print(f"Error checking key {key}: {e}")
                     error_keys.append(key)
+                    continue
 
             # Tạo embed để hiển thị kết quả
             embed = discord.Embed(
@@ -410,40 +427,7 @@ async def check_key(
                 color=discord.Color.blue()
             )
 
-            # Thêm thông tin cho từng loại key
-            if active_keys:
-                active_keys_text = "\n".join([f"`{key}` - **{days}** ngày" for key, days in active_keys])
-                embed.add_field(
-                    name=f"✅ Keys còn hạn ({len(active_keys)})",
-                    value=active_keys_text[:1024] if len(active_keys_text) > 1024 else active_keys_text,
-                    inline=False
-                )
-
-            if inactive_keys:
-                inactive_keys_text = "\n".join([f"`{key}`" for key in inactive_keys])
-                embed.add_field(
-                    name=f"❌ Keys hết hạn ({len(inactive_keys)})",
-                    value=inactive_keys_text[:1024] if len(inactive_keys_text) > 1024 else inactive_keys_text,
-                    inline=False
-                )
-
-            if not_activated_keys:
-                not_activated_keys_text = "\n".join([f"`{key}`" for key in not_activated_keys])
-                embed.add_field(
-                    name=f"⚠️ Keys chưa kích hoạt ({len(not_activated_keys)})",
-                    value=not_activated_keys_text[:1024] if len(not_activated_keys_text) > 1024 else not_activated_keys_text,
-                    inline=False
-                )
-
-            if error_keys:
-                error_keys_text = "\n".join([f"`{key}`" for key in error_keys])
-                embed.add_field(
-                    name=f"⛔ Keys lỗi ({len(error_keys)})",
-                    value=error_keys_text[:1024] if len(error_keys_text) > 1024 else error_keys_text,
-                    inline=False
-                )
-
-            # Thêm tổng kết
+            # Thêm tổng kết lên đầu
             total = len(key_list)
             summary = f"Tổng số key: **{total}**\n"
             summary += f"✅ Còn hạn: **{len(active_keys)}**\n"
@@ -453,13 +437,94 @@ async def check_key(
             
             embed.description = summary
 
+            # Thêm thông tin cho từng loại key
+            if active_keys:
+                # Sắp xếp theo số ngày còn lại
+                active_keys.sort(key=lambda x: x[1], reverse=True)
+                active_keys_text = "\n".join([f"`{key}` - **{days}** ngày" for key, days in active_keys])
+                if len(active_keys_text) > 1024:
+                    chunks = [active_keys_text[i:i+1024] for i in range(0, len(active_keys_text), 1024)]
+                    for i, chunk in enumerate(chunks):
+                        embed.add_field(
+                            name=f"✅ Keys còn hạn ({len(active_keys)}) - Phần {i+1}",
+                            value=chunk,
+                            inline=False
+                        )
+                else:
+                    embed.add_field(
+                        name=f"✅ Keys còn hạn ({len(active_keys)})",
+                        value=active_keys_text,
+                        inline=False
+                    )
+
+            if inactive_keys:
+                inactive_keys_text = "\n".join([f"`{key}`" for key in inactive_keys])
+                if len(inactive_keys_text) > 1024:
+                    chunks = [inactive_keys_text[i:i+1024] for i in range(0, len(inactive_keys_text), 1024)]
+                    for i, chunk in enumerate(chunks):
+                        embed.add_field(
+                            name=f"❌ Keys hết hạn ({len(inactive_keys)}) - Phần {i+1}",
+                            value=chunk,
+                            inline=False
+                        )
+                else:
+                    embed.add_field(
+                        name=f"❌ Keys hết hạn ({len(inactive_keys)})",
+                        value=inactive_keys_text,
+                        inline=False
+                    )
+
+            if not_activated_keys:
+                not_activated_keys_text = "\n".join([f"`{key}`" for key in not_activated_keys])
+                if len(not_activated_keys_text) > 1024:
+                    chunks = [not_activated_keys_text[i:i+1024] for i in range(0, len(not_activated_keys_text), 1024)]
+                    for i, chunk in enumerate(chunks):
+                        embed.add_field(
+                            name=f"⚠️ Keys chưa kích hoạt ({len(not_activated_keys)}) - Phần {i+1}",
+                            value=chunk,
+                            inline=False
+                        )
+                else:
+                    embed.add_field(
+                        name=f"⚠️ Keys chưa kích hoạt ({len(not_activated_keys)})",
+                        value=not_activated_keys_text,
+                        inline=False
+                    )
+
+            if error_keys:
+                error_keys_text = "\n".join([f"`{key}`" for key in error_keys])
+                if len(error_keys_text) > 1024:
+                    chunks = [error_keys_text[i:i+1024] for i in range(0, len(error_keys_text), 1024)]
+                    for i, chunk in enumerate(chunks):
+                        embed.add_field(
+                            name=f"⛔ Keys lỗi ({len(error_keys)}) - Phần {i+1}",
+                            value=chunk,
+                            inline=False
+                        )
+                else:
+                    embed.add_field(
+                        name=f"⛔ Keys lỗi ({len(error_keys)})",
+                        value=error_keys_text,
+                        inline=False
+                    )
+
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
-            
+
         # Xử lý một key duy nhất
         key = key_list[0]
         api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
-        response = requests.get(api_url)
+        
+        # Thử tối đa 3 lần cho single key
+        for attempt in range(3):
+            try:
+                response = requests.get(api_url, timeout=10)
+                break
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                if attempt == 2:
+                    await interaction.followup.send("❌ Không thể kết nối đến server sau nhiều lần thử. Vui lòng thử lại sau.", ephemeral=True)
+                    return
+                await asyncio.sleep(1)
         
         if response.status_code == 200:
             try:
