@@ -328,7 +328,7 @@ async def check_and_add_role(member: discord.Member, role_id: int):
 
 @bot.tree.command(name="check", description="Kiểm tra thời hạn của key")
 @app_commands.describe(
-    key="Key cần kiểm tra thời hạn"
+    key="Key cần kiểm tra thời hạn (nhiều key cách nhau bằng khoảng trắng)"
 )
 async def check_key(
     interaction: discord.Interaction,
@@ -338,7 +338,126 @@ async def check_key(
         # Defer the response since we'll make an HTTP request
         await interaction.response.defer(ephemeral=True)
         
-        # Make the API request
+        # Tách các key nếu có nhiều key
+        key_list = [k.strip() for k in key.split() if k.strip()]
+        
+        if len(key_list) > 30:
+            await interaction.followup.send("❌ Vui lòng kiểm tra tối đa 30 key một lần.", ephemeral=True)
+            return
+            
+        if len(key_list) > 1:
+            # Nếu có nhiều key, xử lý giống như lệnh checklist
+            # Khởi tạo lists để lưu kết quả
+            active_keys = []
+            inactive_keys = []
+            not_activated_keys = []
+            error_keys = []
+
+            # Kiểm tra từng key
+            for key in key_list:
+                try:
+                    api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
+                    response = requests.get(api_url)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        
+                        if not isinstance(data, dict):
+                            error_keys.append(key)
+                            continue
+
+                        error = data.get("error")
+                        message = data.get("message")
+                        seconds_remaining = data.get("data")
+
+                        if error is None or message is None:
+                            error_keys.append(key)
+                            continue
+
+                        # Convert error to int if needed
+                        if isinstance(error, str):
+                            try:
+                                error = int(error)
+                            except ValueError:
+                                error_keys.append(key)
+                                continue
+
+                        # Phân loại key
+                        if error == 2:
+                            not_activated_keys.append(key)
+                        elif error != 0 or message.lower() != "ok":
+                            inactive_keys.append(key)
+                        else:
+                            try:
+                                seconds_remaining = int(seconds_remaining)
+                                days_remaining = seconds_remaining // (24 * 3600)
+                                if seconds_remaining > 0:
+                                    active_keys.append((key, days_remaining))
+                                else:
+                                    inactive_keys.append(key)
+                            except (ValueError, TypeError):
+                                error_keys.append(key)
+                    else:
+                        error_keys.append(key)
+
+                except Exception as e:
+                    print(f"Error checking key {key}: {e}")
+                    error_keys.append(key)
+
+            # Tạo embed để hiển thị kết quả
+            embed = discord.Embed(
+                title="📊 Kết quả kiểm tra keys",
+                color=discord.Color.blue()
+            )
+
+            # Thêm thông tin cho từng loại key
+            if active_keys:
+                active_keys_text = "\n".join([f"`{key}` - **{days}** ngày" for key, days in active_keys])
+                embed.add_field(
+                    name=f"✅ Keys còn hạn ({len(active_keys)})",
+                    value=active_keys_text[:1024] if len(active_keys_text) > 1024 else active_keys_text,
+                    inline=False
+                )
+
+            if inactive_keys:
+                inactive_keys_text = "\n".join([f"`{key}`" for key in inactive_keys])
+                embed.add_field(
+                    name=f"❌ Keys hết hạn ({len(inactive_keys)})",
+                    value=inactive_keys_text[:1024] if len(inactive_keys_text) > 1024 else inactive_keys_text,
+                    inline=False
+                )
+
+            if not_activated_keys:
+                not_activated_keys_text = "\n".join([f"`{key}`" for key in not_activated_keys])
+                embed.add_field(
+                    name=f"⚠️ Keys chưa kích hoạt ({len(not_activated_keys)})",
+                    value=not_activated_keys_text[:1024] if len(not_activated_keys_text) > 1024 else not_activated_keys_text,
+                    inline=False
+                )
+
+            if error_keys:
+                error_keys_text = "\n".join([f"`{key}`" for key in error_keys])
+                embed.add_field(
+                    name=f"⛔ Keys lỗi ({len(error_keys)})",
+                    value=error_keys_text[:1024] if len(error_keys_text) > 1024 else error_keys_text,
+                    inline=False
+                )
+
+            # Thêm tổng kết
+            total = len(key_list)
+            summary = f"Tổng số key: **{total}**\n"
+            summary += f"✅ Còn hạn: **{len(active_keys)}**\n"
+            summary += f"❌ Hết hạn: **{len(inactive_keys)}**\n"
+            summary += f"⚠️ Chưa kích hoạt: **{len(not_activated_keys)}**\n"
+            summary += f"⛔ Lỗi: **{len(error_keys)}**"
+            
+            embed.description = summary
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+            
+        # Xử lý một key duy nhất
+        key = key_list[0]
         api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
         response = requests.get(api_url)
         
