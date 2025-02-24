@@ -343,17 +343,45 @@ async def check_key(
         response = requests.get(api_url)
         
         if response.status_code == 200:
-            data = response.json()
-            
-            if data.get("error") == 0 and data.get("message") == "ok":
+            try:
+                data = response.json()
+                print(f"API Response for key {key}: {data}")  # Debug log
+                
+                # Kiểm tra xem response có đúng format không
+                if not isinstance(data, dict):
+                    await interaction.followup.send("❌ Định dạng dữ liệu không hợp lệ.", ephemeral=True)
+                    return
+
+                error = data.get("error")
+                message = data.get("message")
+                timestamp = data.get("data")
+
+                print(f"Parsed data - error: {error}, message: {message}, timestamp: {timestamp}")  # Debug log
+
+                # Key không tồn tại hoặc hết hạn
+                if error is None or message is None or timestamp is None:
+                    await interaction.followup.send("❌ Phản hồi từ server không đầy đủ thông tin.", ephemeral=True)
+                    return
+                    
+                if isinstance(timestamp, str):
+                    try:
+                        timestamp = int(timestamp)
+                    except ValueError:
+                        await interaction.followup.send("❌ Định dạng thời gian không hợp lệ.", ephemeral=True)
+                        return
+
                 # Convert timestamp to datetime
-                timestamp = int(data.get("data", 0))
                 expiry_date = datetime.fromtimestamp(timestamp)
+                current_time = datetime.now()
+                
+                # Tính thời gian còn lại
+                time_left = expiry_date - current_time
+                days_left = time_left.days
                 
                 # Create embed for response
                 embed = discord.Embed(
                     title="🔍 Thông tin key",
-                    color=discord.Color.blue()
+                    color=discord.Color.green() if days_left > 0 else discord.Color.red()
                 )
                 
                 embed.add_field(
@@ -367,11 +395,19 @@ async def check_key(
                     value=f"<t:{timestamp}:F>",
                     inline=False
                 )
+
+                embed.add_field(
+                    name="Trạng thái",
+                    value=f"{'🟢 Còn ' + str(days_left) + ' ngày' if days_left > 0 else '🔴 Đã hết hạn'}",
+                    inline=False
+                )
                 
                 await interaction.followup.send(embed=embed, ephemeral=True)
-            else:
-                await interaction.followup.send("❌ Key không hợp lệ hoặc đã hết hạn.", ephemeral=True)
+            except ValueError as ve:
+                print(f"ValueError while processing response: {ve}")  # Debug log
+                await interaction.followup.send("❌ Dữ liệu không hợp lệ từ server.", ephemeral=True)
         else:
+            print(f"HTTP Error: Status code {response.status_code}")  # Debug log
             await interaction.followup.send("❌ Không thể kết nối đến server. Vui lòng thử lại sau.", ephemeral=True)
             
     except Exception as e:
