@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 from urllib.parse import quote
 import requests
 from datetime import datetime
-import asyncio  # Thêm import asyncio
+import asyncio
+import aiohttp  # Thêm import aiohttp cho async requests
 
 # Load environment variables
 load_dotenv()
@@ -327,6 +328,63 @@ async def check_and_add_role(member: discord.Member, role_id: int):
         return False
 
 
+async def check_single_key(session, key):
+    """
+    Hàm kiểm tra một key riêng lẻ
+    """
+    api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
+    
+    for attempt in range(3):  # Thử tối đa 3 lần
+        try:
+            async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    try:
+                        data = await response.json()
+                        
+                        if not isinstance(data, dict):
+                            return (key, "error")
+
+                        error = data.get("error")
+                        message = data.get("message")
+                        seconds_remaining = data.get("data")
+
+                        if error is None or message is None:
+                            return (key, "error")
+
+                        # Convert error to int if needed
+                        if isinstance(error, str):
+                            try:
+                                error = int(error)
+                            except ValueError:
+                                return (key, "error")
+
+                        # Phân loại key
+                        if error == 2:
+                            return (key, "not_activated")
+                        elif error != 0 or message.lower() != "ok":
+                            return (key, "inactive")
+                        else:
+                            try:
+                                seconds_remaining = int(seconds_remaining)
+                                if seconds_remaining > 0:
+                                    days_remaining = seconds_remaining // (24 * 3600)
+                                    return (key, "active", days_remaining)
+                                else:
+                                    return (key, "inactive")
+                            except (ValueError, TypeError):
+                                return (key, "error")
+                    except:
+                        if attempt == 2:
+                            return (key, "error")
+                else:
+                    if attempt == 2:
+                        return (key, "error")
+        except:
+            if attempt == 2:
+                return (key, "error")
+        await asyncio.sleep(1)
+    return (key, "error")
+
 @bot.tree.command(name="check", description="Kiểm tra thời hạn của key")
 @app_commands.describe(
     key="Key cần kiểm tra thời hạn (nhiều key cách nhau bằng khoảng trắng)"
@@ -336,7 +394,7 @@ async def check_key(
     key: str
 ):
     try:
-        # Defer the response since we'll make an HTTP request
+        # Defer the response since we'll make HTTP requests
         await interaction.response.defer(ephemeral=True)
         
         # Tách các key nếu có nhiều key
@@ -347,79 +405,33 @@ async def check_key(
             return
             
         if len(key_list) > 1:
-            # Nếu có nhiều key, xử lý giống như lệnh checklist
             # Khởi tạo lists để lưu kết quả
             active_keys = []
             inactive_keys = []
             not_activated_keys = []
             error_keys = []
 
-            # Kiểm tra từng key
-            for key in key_list:
-                try:
-                    # Thêm delay 0.5 giây giữa các request
-                    await asyncio.sleep(0.5)
-                    
-                    api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
-                    for attempt in range(3):  # Thử tối đa 3 lần cho mỗi key
-                        try:
-                            response = requests.get(api_url, timeout=10)  # Thêm timeout
-                            break
-                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                            if attempt == 2:  # Nếu đã thử 3 lần vẫn lỗi
-                                error_keys.append(key)
-                                continue
-                            await asyncio.sleep(1)  # Chờ 1 giây trước khi thử lại
-                    
-                    if response.status_code == 200:
-                        try:
-                            data = response.json()
-                        except:
-                            error_keys.append(key)
-                            continue
-                        
-                        if not isinstance(data, dict):
-                            error_keys.append(key)
-                            continue
+            # Tạo session để tái sử dụng connection
+            async with aiohttp.ClientSession() as session:
+                # Chạy tất cả requests đồng thời
+                tasks = [check_single_key(session, key) for key in key_list]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                        error = data.get("error")
-                        message = data.get("message")
-                        seconds_remaining = data.get("data")
-
-                        if error is None or message is None:
-                            error_keys.append(key)
-                            continue
-
-                        # Convert error to int if needed
-                        if isinstance(error, str):
-                            try:
-                                error = int(error)
-                            except ValueError:
-                                error_keys.append(key)
-                                continue
-
-                        # Phân loại key
-                        if error == 2:
-                            not_activated_keys.append(key)
-                        elif error != 0 or message.lower() != "ok":
+                # Phân loại kết quả
+                for result in results:
+                    if isinstance(result, tuple):
+                        key = result[0]
+                        status = result[1]
+                        if status == "active":
+                            active_keys.append((key, result[2]))  # result[2] là số ngày
+                        elif status == "inactive":
                             inactive_keys.append(key)
+                        elif status == "not_activated":
+                            not_activated_keys.append(key)
                         else:
-                            try:
-                                seconds_remaining = int(seconds_remaining)
-                                if seconds_remaining > 0:
-                                    days_remaining = seconds_remaining // (24 * 3600)
-                                    active_keys.append((key, days_remaining))
-                                else:
-                                    inactive_keys.append(key)
-                            except (ValueError, TypeError):
-                                error_keys.append(key)
+                            error_keys.append(key)
                     else:
                         error_keys.append(key)
-
-                except Exception as e:
-                    print(f"Error checking key {key}: {e}")
-                    error_keys.append(key)
-                    continue
 
             # Tạo embed để hiển thị kết quả
             embed = discord.Embed(
@@ -512,80 +524,18 @@ async def check_key(
             return
 
         # Xử lý một key duy nhất
-        key = key_list[0]
-        api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
-        
-        # Thử tối đa 3 lần cho single key
-        for attempt in range(3):
-            try:
-                response = requests.get(api_url, timeout=10)
-                break
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                if attempt == 2:
-                    await interaction.followup.send("❌ Không thể kết nối đến server sau nhiều lần thử. Vui lòng thử lại sau.", ephemeral=True)
-                    return
-                await asyncio.sleep(1)
-        
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                
-                # Kiểm tra xem response có đúng format không
-                if not isinstance(data, dict):
-                    await interaction.followup.send("❌ Định dạng dữ liệu không hợp lệ.", ephemeral=True)
-                    return
-
-                error = data.get("error")
-                message = data.get("message")
-                seconds_remaining = data.get("data")
-
-                # Key không tồn tại hoặc hết hạn
-                if error is None or message is None:
-                    await interaction.followup.send("❌ Phản hồi từ server không đầy đủ thông tin.", ephemeral=True)
-                    return
-
-                # Convert error to int if it's string
-                if isinstance(error, str):
-                    try:
-                        error = int(error)
-                    except ValueError:
-                        await interaction.followup.send("❌ Định dạng dữ liệu không hợp lệ.", ephemeral=True)
-                        return
-
-                # Kiểm tra các trường hợp error
-                if error == 2:
-                    await interaction.followup.send(f"⚠️ Key `{key}` chưa được kích hoạt.", ephemeral=True)
-                    return
-                elif error != 0 or message.lower() != "ok":
-                    await interaction.followup.send("❌ Key không tồn tại hoặc đã hết hạn.", ephemeral=True)
-                    return
-
-                # Kiểm tra data cho key hợp lệ
-                if seconds_remaining is None:
-                    await interaction.followup.send("❌ Không lấy được thông tin thời hạn.", ephemeral=True)
-                    return
-
-                # Convert seconds_remaining to int
-                try:
-                    seconds_remaining = int(seconds_remaining)
-                except (ValueError, TypeError):
-                    await interaction.followup.send("❌ Định dạng thời gian không hợp lệ.", ephemeral=True)
-                    return
-
-                # Tính số ngày còn lại
-                days_remaining = seconds_remaining // (24 * 3600)  # Chuyển giây thành ngày
-
-                # Tạo thông báo
-                if seconds_remaining > 0:
-                    await interaction.followup.send(f"✅ Key `{key}` còn **{days_remaining}** ngày.", ephemeral=True)
-                else:
-                    await interaction.followup.send(f"❌ Key `{key}` đã hết hạn.", ephemeral=True)
-
-            except ValueError as ve:
-                await interaction.followup.send("❌ Dữ liệu không hợp lệ từ server.", ephemeral=True)
-        else:
-            await interaction.followup.send("❌ Không thể kết nối đến server. Vui lòng thử lại sau.", ephemeral=True)
+        async with aiohttp.ClientSession() as session:
+            result = await check_single_key(session, key_list[0])
             
+            if result[1] == "active":
+                await interaction.followup.send(f"✅ Key `{result[0]}` còn **{result[2]}** ngày.", ephemeral=True)
+            elif result[1] == "not_activated":
+                await interaction.followup.send(f"⚠️ Key `{result[0]}` chưa được kích hoạt.", ephemeral=True)
+            elif result[1] == "inactive":
+                await interaction.followup.send(f"❌ Key `{result[0]}` đã hết hạn hoặc không tồn tại.", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ Có lỗi xảy ra khi kiểm tra key.", ephemeral=True)
+
     except Exception as e:
         print(f"Error checking key: {e}")
         await interaction.followup.send("❌ Có lỗi xảy ra khi kiểm tra key.", ephemeral=True)
