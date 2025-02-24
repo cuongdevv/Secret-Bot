@@ -345,7 +345,6 @@ async def check_key(
         if response.status_code == 200:
             try:
                 data = response.json()
-                print(f"API Response for key {key}: {data}")  # Debug log
                 
                 # Kiểm tra xem response có đúng format không
                 if not isinstance(data, dict):
@@ -356,24 +355,22 @@ async def check_key(
                 message = data.get("message")
                 timestamp = data.get("data")
 
-                print(f"Parsed data - error: {error}, message: {message}, timestamp: {timestamp}")  # Debug log
-
                 # Key không tồn tại hoặc hết hạn
                 if error is None or message is None or timestamp is None:
                     await interaction.followup.send("❌ Phản hồi từ server không đầy đủ thông tin.", ephemeral=True)
                     return
 
                 # Kiểm tra giá trị error và message
-                if error != 0 or message != "ok":
+                if not isinstance(error, (int, float)) or error != 0 or message.lower() != "ok":
                     await interaction.followup.send("❌ Key không tồn tại hoặc đã hết hạn.", ephemeral=True)
                     return
-                    
-                if isinstance(timestamp, str):
-                    try:
-                        timestamp = int(timestamp)
-                    except ValueError:
-                        await interaction.followup.send("❌ Định dạng thời gian không hợp lệ.", ephemeral=True)
-                        return
+
+                # Convert timestamp to int
+                try:
+                    timestamp = int(timestamp)
+                except (ValueError, TypeError):
+                    await interaction.followup.send("❌ Định dạng thời gian không hợp lệ.", ephemeral=True)
+                    return
 
                 # Convert timestamp to datetime
                 expiry_date = datetime.fromtimestamp(timestamp)
@@ -409,10 +406,8 @@ async def check_key(
                 
                 await interaction.followup.send(embed=embed, ephemeral=True)
             except ValueError as ve:
-                print(f"ValueError while processing response: {ve}")  # Debug log
                 await interaction.followup.send("❌ Dữ liệu không hợp lệ từ server.", ephemeral=True)
         else:
-            print(f"HTTP Error: Status code {response.status_code}")  # Debug log
             await interaction.followup.send("❌ Không thể kết nối đến server. Vui lòng thử lại sau.", ephemeral=True)
             
     except Exception as e:
