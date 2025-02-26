@@ -586,10 +586,20 @@ async def add_time(
                     async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                         if response.status == 200:
                             data = await response.text()
-                            if "success" in data.lower():
-                                return (account, True, data)
-                            else:
-                                return (account, False, data)
+                            try:
+                                # Thử parse JSON từ phản hồi
+                                json_data = await response.json()
+                                # Kiểm tra nếu message là "OK" thì coi là thành công
+                                if json_data.get("message") == "OK":
+                                    return (account, True, "Thành công")
+                                else:
+                                    return (account, False, f"Lỗi: {data}")
+                            except:
+                                # Nếu không phải JSON, kiểm tra theo cách cũ
+                                if "success" in data.lower() or "ok" in data.lower():
+                                    return (account, True, "Thành công")
+                                else:
+                                    return (account, False, f"Lỗi: {data}")
                         else:
                             return (account, False, f"Mã lỗi: {response.status}")
                 except Exception as e:
