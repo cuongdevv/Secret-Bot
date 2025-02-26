@@ -16,6 +16,8 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 BANK_ID = os.getenv('BANK_ID', '970436')
 ACCOUNT_NO = os.getenv('ACCOUNT_NO')
 ACCOUNT_NAME = os.getenv('ACCOUNT_NAME')
+# Thêm API_KEY cho lệnh addtime
+API_KEY = os.getenv('API_KEY')
 
 # Thêm hằng số cho ROLE_ID
 CUSTOMER_ROLE_ID = 1334194617322831935
@@ -332,7 +334,7 @@ async def check_single_key(session, key):
     """
     Hàm kiểm tra một key riêng lẻ
     """
-    api_url = f"http://sv.hackrules.com/Robo/api.php?TK={key}"
+    api_url = f"http://sv.hackrules.com/API/api.php?TK={key}"
     
     for attempt in range(3):  # Thử tối đa 3 lần
         try:
@@ -539,6 +541,180 @@ async def check_key(
     except Exception as e:
         print(f"Error checking key: {e}")
         await interaction.followup.send("❌ Có lỗi xảy ra khi kiểm tra key.", ephemeral=True)
+
+
+@bot.tree.command(name="addtime", description="Thêm thời gian cho key")
+@app_commands.describe(
+    account="Tài khoản cần thêm thời gian (nhiều tài khoản cách nhau bằng khoảng trắng)",
+    hours="Số giờ cần thêm"
+)
+async def add_time(
+    interaction: discord.Interaction,
+    account: str,
+    hours: int
+):
+    try:
+        # Kiểm tra quyền admin
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Bạn không có quyền sử dụng lệnh này!", ephemeral=True)
+            return
+            
+        # Kiểm tra số giờ
+        if hours <= 0:
+            await interaction.response.send_message("❌ Số giờ phải lớn hơn 0!", ephemeral=True)
+            return
+            
+        await interaction.response.defer(ephemeral=True)
+        
+        # Tách các tài khoản nếu có nhiều tài khoản
+        account_list = [acc.strip() for acc in account.split() if acc.strip()]
+        
+        if len(account_list) > 30:
+            await interaction.followup.send("❌ Vui lòng thêm thời gian tối đa 30 tài khoản một lần.", ephemeral=True)
+            return
+        
+        # Khởi tạo lists để lưu kết quả
+        success_accounts = []
+        failed_accounts = []
+        
+        # Tạo session để tái sử dụng connection
+        async with aiohttp.ClientSession() as session:
+            # Hàm xử lý thêm thời gian cho một tài khoản
+            async def add_time_single(session, account):
+                api_url = f"http://sv.hackrules.com/API/addtime.php?API={API_KEY}&TK={account}&SOGIO={hours}"
+                try:
+                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                        if response.status == 200:
+                            data = await response.text()
+                            if "success" in data.lower():
+                                return (account, True, data)
+                            else:
+                                return (account, False, data)
+                        else:
+                            return (account, False, f"Mã lỗi: {response.status}")
+                except Exception as e:
+                    return (account, False, str(e))
+            
+            # Chạy tất cả requests đồng thời
+            tasks = [add_time_single(session, acc) for acc in account_list]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Phân loại kết quả
+            for result in results:
+                if isinstance(result, tuple):
+                    acc = result[0]
+                    success = result[1]
+                    message = result[2]
+                    if success:
+                        success_accounts.append(acc)
+                    else:
+                        failed_accounts.append((acc, message))
+                else:
+                    # Xử lý trường hợp exception
+                    failed_accounts.append((account_list[results.index(result)], "Lỗi không xác định"))
+        
+        # Tạo embed để hiển thị kết quả
+        embed = discord.Embed(
+            title="📊 Kết quả thêm thời gian",
+            color=discord.Color.blue(),
+            timestamp=interaction.created_at
+        )
+        
+        # Thêm tổng kết lên đầu
+        total = len(account_list)
+        summary = f"Tổng số tài khoản: **{total}**\n"
+        summary += f"✅ Thành công: **{len(success_accounts)}**\n"
+        summary += f"❌ Thất bại: **{len(failed_accounts)}**\n"
+        summary += f"⏱️ Số giờ đã thêm: **{hours}** giờ/tài khoản"
+        
+        embed.description = summary
+        
+        # Thêm thông tin cho từng loại tài khoản
+        if success_accounts:
+            success_accounts_text = "\n".join([f"`{acc}`" for acc in success_accounts])
+            if len(success_accounts_text) > 1024:
+                chunks = [success_accounts_text[i:i+1024] for i in range(0, len(success_accounts_text), 1024)]
+                for i, chunk in enumerate(chunks):
+                    embed.add_field(
+                        name=f"✅ Tài khoản thành công ({len(success_accounts)}) - Phần {i+1}",
+                        value=chunk,
+                        inline=False
+                    )
+            else:
+                embed.add_field(
+                    name=f"✅ Tài khoản thành công ({len(success_accounts)})",
+                    value=success_accounts_text,
+                    inline=False
+                )
+        
+        if failed_accounts:
+            failed_accounts_text = "\n".join([f"`{acc}` - {msg}" for acc, msg in failed_accounts])
+            if len(failed_accounts_text) > 1024:
+                chunks = [failed_accounts_text[i:i+1024] for i in range(0, len(failed_accounts_text), 1024)]
+                for i, chunk in enumerate(chunks):
+                    embed.add_field(
+                        name=f"❌ Tài khoản thất bại ({len(failed_accounts)}) - Phần {i+1}",
+                        value=chunk,
+                        inline=False
+                    )
+            else:
+                embed.add_field(
+                    name=f"❌ Tài khoản thất bại ({len(failed_accounts)})",
+                    value=failed_accounts_text,
+                    inline=False
+                )
+        
+        # Gửi kết quả cho người dùng
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+        # Gửi log vào channel
+        if success_accounts:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="📝 Log Thêm Thời Gian",
+                    description="Chi tiết thao tác:",
+                    color=discord.Color.blue(),
+                    timestamp=interaction.created_at
+                )
+                log_embed.add_field(
+                    name="Người thực hiện",
+                    value=f"{interaction.user.mention} (`{interaction.user.name}`)",
+                    inline=True
+                )
+                log_embed.add_field(
+                    name="Số tài khoản",
+                    value=f"`{len(success_accounts)}/{total}`",
+                    inline=True
+                )
+                log_embed.add_field(
+                    name="Số giờ thêm",
+                    value=f"`{hours} giờ`",
+                    inline=True
+                )
+                
+                # Thêm danh sách tài khoản thành công
+                success_accounts_text = "\n".join([f"`{acc}`" for acc in success_accounts])
+                if len(success_accounts_text) > 1024:
+                    chunks = [success_accounts_text[i:i+1024] for i in range(0, len(success_accounts_text), 1024)]
+                    for i, chunk in enumerate(chunks):
+                        log_embed.add_field(
+                            name=f"Tài khoản đã thêm thời gian - Phần {i+1}",
+                            value=chunk,
+                            inline=False
+                        )
+                else:
+                    log_embed.add_field(
+                        name="Tài khoản đã thêm thời gian",
+                        value=success_accounts_text,
+                        inline=False
+                    )
+                
+                await log_channel.send(embed=log_embed)
+                
+    except Exception as e:
+        print(f"Error in addtime command: {e}")
+        await interaction.followup.send("❌ Có lỗi xảy ra. Vui lòng thử lại sau.", ephemeral=True)
 
 # Run the bot
 bot.run(DISCORD_TOKEN)
