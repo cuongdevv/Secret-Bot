@@ -334,7 +334,7 @@ async def check_single_key(session, key):
     """
     Hàm kiểm tra một key riêng lẻ
     """
-    api_url = f"http://sv.hackrules.com/API/api.php?TK={key}"
+    api_url = f"https://api.autoit.pro/API/api.php?TK={key}"
     
     for attempt in range(3):  # Thử tối đa 3 lần
         try:
@@ -581,7 +581,7 @@ async def add_time(
         async with aiohttp.ClientSession() as session:
             # Hàm xử lý thêm thời gian cho một tài khoản
             async def add_time_single(session, account):
-                api_url = f"http://sv.hackrules.com/API/addtime.php?API={API_KEY}&TK={account}&SOGIO={hours}"
+                api_url = f"https://api.autoit.pro/API/addtime.php?API={API_KEY}&TK={account}&SOGIO={hours}"
                 try:
                     async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                         if response.status == 200:
